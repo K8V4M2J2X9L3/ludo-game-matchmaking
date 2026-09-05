@@ -1,0 +1,126 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "root.child('users').child($uid).child('uid').val() === auth.uid || root.child('admins').child(auth.uid).exists()",
+        ".write": "root.child('users').child($uid).child('uid').val() === auth.uid || root.child('admins').child(auth.uid).exists()",
+        "uid": { ".validate": "newData.isString()" },
+        "email": { ".validate": "newData.isString()" },
+        "displayName": { ".validate": "newData.isString()" },
+        "photoURL": { ".validate": "newData.isString() || newData.val() === null" },
+        "coins": { ".validate": "newData.isNumber()" },
+        "winningCoins": { ".validate": "newData.isNumber()" },
+        "totalWinnings": { ".validate": "newData.isNumber()" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "referralCode": { ".validate": "newData.isString()" },
+        "referredBy": { ".validate": "newData.isString() || newData.val() === null" },
+        "referralRewards": { ".validate": "newData.isNumber()" },
+        "kycVerified": { ".validate": "newData.isBoolean()" },
+        "stats": {
+          ".validate": "newData.hasChildren(['totalMatches', 'totalWins']) || newData.val() === null",
+          "totalMatches": { ".validate": "newData.isNumber()" },
+          "totalWins": { ".validate": "newData.isNumber()" },
+          "winRate": { ".validate": "newData.isNumber()" }
+        }
+      }
+    },
+    "matchmaking": {
+      ".read": "auth !== null",
+      ".write": "auth !== null",
+      "$matchId": {
+        ".validate": "newData.hasChildren(['players', 'entryFee', 'status', 'createdAt'])",
+        "players": {
+          "$uid": {
+            "uid": { ".validate": "newData.isString()" },
+            "displayName": { ".validate": "newData.isString()" },
+            "joinedAt": { ".validate": "newData.isNumber()" }
+          }
+        },
+        "entryFee": { ".validate": "newData.isNumber() && newData.val() > 0" },
+        "winnerId": { ".validate": "newData.isString() || newData.val() === null" },
+        "winAmount": { ".validate": "newData.isNumber() || newData.val() === null" },
+        "status": { ".validate": "newData.val() === 'waiting' || newData.val() === 'ongoing' || newData.val() === 'completed'" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "completedAt": { ".validate": "newData.isNumber() || newData.val() === null" }
+      }
+    },
+    "transactions": {
+      "$uid": {
+        ".read": "root.child('users').child($uid).child('uid').val() === auth.uid || root.child('admins').child(auth.uid).exists()",
+        ".write": "root.child('admins').child(auth.uid).exists()",
+        "$transactionId": {
+          "uid": { ".validate": "newData.isString()" },
+          "type": { ".validate": "newData.val() === 'deposit' || newData.val() === 'withdrawal' || newData.val() === 'win' || newData.val() === 'loss' || newData.val() === 'referral'" },
+          "amount": { ".validate": "newData.isNumber() && newData.val() > 0" },
+          "status": { ".validate": "newData.val() === 'pending' || newData.val() === 'completed' || newData.val() === 'failed'" },
+          "description": { ".validate": "newData.isString()" },
+          "timestamp": { ".validate": "newData.isNumber()" },
+          "razorpayOrderId": { ".validate": "newData.isString() || newData.val() === null" },
+          "razorpayPaymentId": { ".validate": "newData.isString() || newData.val() === null" }
+        }
+      }
+    },
+    "withdrawalRequests": {
+      ".read": "root.child('admins').child(auth.uid).exists() || auth !== null",
+      ".write": "auth !== null",
+      "$requestId": {
+        "uid": { ".validate": "newData.isString()" },
+        "amount": { ".validate": "newData.isNumber() && newData.val() > 0" },
+        "bankDetails": {
+          "accountNumber": { ".validate": "newData.isString()" },
+          "ifscCode": { ".validate": "newData.isString()" },
+          "accountHolder": { ".validate": "newData.isString()" }
+        },
+        "status": { ".validate": "newData.val() === 'pending' || newData.val() === 'approved' || newData.val() === 'rejected' || newData.val() === 'completed'" },
+        "requestedAt": { ".validate": "newData.isNumber()" },
+        "processedAt": { ".validate": "newData.isNumber() || newData.val() === null" },
+        "adminNotes": { ".validate": "newData.isString() || newData.val() === null" }
+      }
+    },
+    "admin": {
+      ".read": "root.child('admins').child(auth.uid).exists()",
+      ".write": "root.child('admins').child(auth.uid).exists()",
+      "settings": {
+        "razorpayKey": { ".validate": "newData.isString()" },
+        "razorpaySecret": { ".validate": "newData.isString()" },
+        "zappiApiKey": { ".validate": "newData.isString()" },
+        "zappiEnabled": { ".validate": "newData.isBoolean()" },
+        "coinAdditionEnabled": { ".validate": "newData.isBoolean()" },
+        "winnerPayoutPercentage": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "platformCommissionPercentage": { ".validate": "newData.isNumber()" },
+        "minimumWithdrawal": { ".validate": "newData.isNumber()" },
+        "gstPercentage": { ".validate": "newData.isNumber()" }
+      },
+      "policies": {
+        "privacyPolicy": { ".validate": "newData.isString()" },
+        "termsAndConditions": { ".validate": "newData.isString()" },
+        "refundPolicy": { ".validate": "newData.isString()" },
+        "gstPolicy": { ".validate": "newData.isString()" },
+        "supportTelegram": { ".validate": "newData.isString()" }
+      }
+    },
+    "admins": {
+      ".read": "root.child('admins').child(auth.uid).exists()",
+      ".write": false,
+      "$uid": {
+        "uid": { ".validate": "newData.isString()" },
+        "email": { ".validate": "newData.isString()" },
+        "role": { ".validate": "newData.val() === 'super_admin' || newData.val() === 'admin'" },
+        "createdAt": { ".validate": "newData.isNumber()" }
+      }
+    },
+    "referrals": {
+      ".read": "auth !== null",
+      ".write": "auth !== null",
+      "$referralId": {
+        "referrerId": { ".validate": "newData.isString()" },
+        "refereeId": { ".validate": "newData.isString()" },
+        "rewardAmount": { ".validate": "newData.isNumber()" },
+        "status": { ".validate": "newData.val() === 'pending' || newData.val() === 'completed'" },
+        "createdAt": { ".validate": "newData.isNumber()" }
+      }
+    }
+  }
+}
