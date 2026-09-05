@@ -130,7 +130,7 @@ export default function Game() {
                 <div className="grid grid-cols-4 gap-0 w-full h-full p-4">
                   {/* Home Zones */}
                   {['Red', 'Yellow', 'Blue', 'Green'].map((color, idx) => (
-                    <div key={idx} className={`bg-${color.toLowerCase()}-200 border border-gray-400 rounded flex items-center justify-center">
+                    <div key={idx} className={`bg-${color.toLowerCase()}-200 border border-gray-400 rounded flex items-center justify-center`}>
                       <div className="text-center">
                         <p className="font-semibold text-sm">{color}</p>
                         <p className="text-2xl">🎮</p>
