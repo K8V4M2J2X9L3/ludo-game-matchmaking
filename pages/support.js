@@ -29,7 +29,7 @@ export default function Support() {
           <div className="space-y-4">
             <div>
               <p className="font-semibold text-gray-800">How do I add coins?</p>
-              <p className="text-gray-600">Go to Wallet > Add Coins and follow the payment process.</p>
+              <p className="text-gray-600">Go to Wallet &gt; Add Coins and follow the payment process.</p>
             </div>
             <div>
               <p className="font-semibold text-gray-800">How long does withdrawal take?</p>
