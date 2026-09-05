@@ -2,7 +2,6 @@
   "name": "ludo-game-matchmaking",
   "version": "1.0.0",
   "description": "Ludo game with live matchmaking, coin system, and admin panel",
-  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
