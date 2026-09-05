@@ -2,6 +2,7 @@
   command = "npm install && npm run build"
   publish = ".next/out"
   functions = "api"
+  environment = { NODE_VERSION = "18.18.0" }
 
 [[redirects]]
   from = "/*"
@@ -16,7 +17,13 @@
 [[headers]]
   for = "/*"
   [headers.values]
+    Cache-Control = "public, max-age=3600"
     X-Frame-Options = "ALLOW"
     X-Content-Type-Options = "nosniff"
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
