@@ -1,162 +1,194 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
 import { auth, db } from '@/firebase';
-import { ref, onValue, push, update } from 'firebase/database';
+import { onValue, ref } from 'firebase/database';
+import { apiRequest } from '@/lib/api';
+
+const quickAmounts = [10, 50, 100, 500];
 
 export default function MatchmakingCard({ userId }) {
+  const router = useRouter();
   const [matches, setMatches] = useState([]);
-  const [selectedEntryFee, setSelectedEntryFee] = useState(10);
-  const [loading, setLoading] = useState(false);
+  const [entryFee, setEntryFee] = useState('50');
   const [userCoins, setUserCoins] = useState(0);
+  const [busyMatchId, setBusyMatchId] = useState('');
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
-    const user = auth.currentUser;
-    if (user) {
-      const userRef = ref(db, `users/${user.uid}`);
-      onValue(userRef, (snapshot) => {
-        const data = snapshot.val();
-        setUserCoins(data.coins || 0);
-      });
+    if (!userId) return undefined;
+    const unsubscribeUser = onValue(ref(db, `users/${userId}/coins`), (snapshot) => {
+      setUserCoins(snapshot.val() || 0);
+    });
+    const unsubscribeMatches = onValue(ref(db, 'matchmaking'), (snapshot) => {
+      const liveMatches = snapshot.exists()
+        ? Object.entries(snapshot.val()).map(([id, match]) => ({ id, ...match }))
+        : [];
+      setMatches(liveMatches.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+    });
+    return () => {
+      unsubscribeUser();
+      unsubscribeMatches();
+    };
+  }, [userId]);
 
-      const matchesRef = ref(db, 'matchmaking');
-      onValue(matchesRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const allMatches = Object.entries(snapshot.val())
-            .filter(([_, match]) => match.status === 'waiting')
-            .map(([id, match]) => ({ id, ...match }));
-          setMatches(allMatches);
-        }
-      });
-    }
-  }, []);
+  const myMatch = useMemo(
+    () => matches.find((match) => match.players?.[userId] && ['waiting', 'ongoing'].includes(match.status)),
+    [matches, userId]
+  );
 
-  const handleCreateMatch = async () => {
-    if (userCoins < selectedEntryFee) {
-      alert('Insufficient coins!');
+  const openMatches = useMemo(
+    () => matches.filter((match) => match.status === 'waiting' && match.creatorId !== userId),
+    [matches, userId]
+  );
+
+  useEffect(() => {
+    if (myMatch?.status === 'ongoing') router.push(`/game/${myMatch.id}`);
+  }, [myMatch?.id, myMatch?.status, router]);
+
+  const authorizedRequest = async (path, method = 'POST', body) => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Please sign in again');
+    return apiRequest(path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  };
+
+  const createMatch = async () => {
+    const amount = Number(entryFee);
+    if (!Number.isSafeInteger(amount) || amount < 10) {
+      setMessage('Enter an amount of at least 10 coins.');
       return;
     }
-    setLoading(true);
+    setBusyMatchId('create');
+    setMessage('');
     try {
-      const user = auth.currentUser;
-      const matchRef = ref(db, 'matchmaking');
-      const newMatchRef = await push(matchRef, {
-        players: {
-          [user.uid]: {
-            uid: user.uid,
-            displayName: user.displayName || 'Player',
-            joinedAt: Date.now()
-          }
-        },
-        entryFee: selectedEntryFee,
-        status: 'waiting',
-        createdAt: Date.now()
-      });
-
-      // Update user coins
-      const userRef = ref(db, `users/${user.uid}`);
-      await update(userRef, {
-        coins: userCoins - selectedEntryFee
-      });
-
-      alert('Match created! Waiting for opponent...');
+      await authorizedRequest('/api/matchmaking/create-match', 'POST', { entryFee: amount });
+      setMessage('Battle created. Waiting for a real player to join…');
     } catch (error) {
-      alert('Error: ' + error.message);
+      setMessage(error.message);
     } finally {
-      setLoading(false);
+      setBusyMatchId('');
     }
   };
 
-  const handleJoinMatch = async (matchId) => {
-    if (userCoins < selectedEntryFee) {
-      alert('Insufficient coins!');
-      return;
-    }
-    setLoading(true);
+  const joinMatch = async (match) => {
+    setBusyMatchId(match.id);
+    setMessage('');
     try {
-      const user = auth.currentUser;
-      const matchRef = ref(db, `matchmaking/${matchId}`);
-      const snapshot = await new Promise((resolve) => {
-        onValue(matchRef, resolve, { onlyOnce: true });
-      });
-      const match = snapshot.val();
-
-      match.players[user.uid] = {
-        uid: user.uid,
-        displayName: user.displayName || 'Player',
-        joinedAt: Date.now()
-      };
-      match.status = 'ongoing';
-
-      await update(matchRef, match);
-
-      // Update user coins
-      const userRef = ref(db, `users/${user.uid}`);
-      await update(userRef, {
-        coins: userCoins - match.entryFee
-      });
-
-      alert('Joined match! Starting game...');
-      // Redirect to game
-      window.location.href = `/game/${matchId}`;
+      await authorizedRequest(`/api/matchmaking/join-match/${match.id}`);
+      router.push(`/game/${match.id}`);
     } catch (error) {
-      alert('Error: ' + error.message);
+      setMessage(error.message);
     } finally {
-      setLoading(false);
+      setBusyMatchId('');
+    }
+  };
+
+  const cancelMatch = async () => {
+    if (!myMatch) return;
+    setBusyMatchId(myMatch.id);
+    setMessage('');
+    try {
+      await authorizedRequest(`/api/matchmaking/cancel-match/${myMatch.id}`);
+      setMessage(`${myMatch.entryFee} coins were returned to your wallet.`);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusyMatchId('');
     }
   };
 
   return (
-    <div className="bg-white rounded-lg p-6 shadow">
-      <h2 className="text-xl font-bold mb-4">🎮 Play Ludo</h2>
-      
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-semibold mb-2">Entry Fee (Coins)</label>
-          <select
-            value={selectedEntryFee}
-            onChange={(e) => setSelectedEntryFee(parseInt(e.target.value))}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-          >
-            <option value={10}>10 Coins</option>
-            <option value={25}>25 Coins</option>
-            <option value={50}>50 Coins</option>
-            <option value={100}>100 Coins</option>
-          </select>
+    <section className="battle-section" aria-labelledby="open-battles-title">
+      <div className="battle-create-card">
+        <div className="section-heading-row">
+          <div>
+            <span className="eyebrow">REAL PLAYERS ONLY</span>
+            <h2>Create a battle</h2>
+          </div>
+          <span className="balance-pill">◉ {userCoins}</span>
         </div>
 
-        <p className="text-sm text-gray-600">Your Coins: <strong>{userCoins}</strong></p>
+        {myMatch?.status === 'waiting' ? (
+          <div className="waiting-room" role="status">
+            <span className="waiting-spinner" aria-hidden="true" />
+            <div>
+              <strong>Waiting for an opponent</strong>
+              <p>Your ₹{myMatch.entryFee} challenge is visible to every online player.</p>
+            </div>
+            <button type="button" className="text-button danger" onClick={cancelMatch} disabled={Boolean(busyMatchId)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="amount-composer">
+              <span>₹</span>
+              <input
+                type="number"
+                min="10"
+                step="1"
+                inputMode="numeric"
+                value={entryFee}
+                onChange={(event) => setEntryFee(event.target.value)}
+                aria-label="Battle amount"
+                placeholder="Enter amount"
+              />
+              <button type="button" onClick={createMatch} disabled={busyMatchId === 'create'}>
+                {busyMatchId === 'create' ? 'Creating…' : 'Create'}
+              </button>
+            </div>
+            <div className="quick-amounts" aria-label="Quick battle amounts">
+              {quickAmounts.map((amount) => (
+                <button key={amount} type="button" onClick={() => setEntryFee(String(amount))}>₹{amount}</button>
+              ))}
+            </div>
+          </>
+        )}
 
-        <button
-          onClick={handleCreateMatch}
-          disabled={loading || userCoins < selectedEntryFee}
-          className="w-full bg-purple-600 text-white py-2 rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-50"
-        >
-          {loading ? 'Creating...' : 'Create Match'}
-        </button>
+        {message && <p className="inline-message">{message}</p>}
       </div>
 
-      {/* Available Matches */}
-      {matches.length > 0 && (
-        <div className="mt-6 pt-6 border-t">
-          <h3 className="font-semibold mb-4">Available Matches</h3>
-          <div className="space-y-2">
-            {matches.map((match) => (
-              <div key={match.id} className="bg-gray-50 p-3 rounded flex justify-between items-center">
-                <div>
-                  <p className="font-semibold">Entry: {match.entryFee} Coins</p>
-                  <p className="text-sm text-gray-600">Players: {Object.keys(match.players).length}/2</p>
-                </div>
-                <button
-                  onClick={() => handleJoinMatch(match.id)}
-                  disabled={loading || userCoins < match.entryFee}
-                  className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
-                >
-                  Join
-                </button>
-              </div>
-            ))}
+      <div className="battle-list-heading">
+        <span />
+        <h2 id="open-battles-title">🏆 Open Battles</h2>
+        <span />
+      </div>
+
+      <div className="battle-list" aria-live="polite">
+        {openMatches.length === 0 ? (
+          <div className="empty-battles">
+            <div className="empty-battles-icon">🎲</div>
+            <strong>No open battles yet</strong>
+            <p>Be the first to create one. Only real player challenges appear here.</p>
           </div>
-        </div>
-      )}
-    </div>
+        ) : openMatches.map((match) => (
+          <article className="battle-row" key={match.id}>
+            <div className="player-avatar">{(match.creatorName || 'P').slice(0, 1).toUpperCase()}</div>
+            <div className="battle-player">
+              <strong>{match.creatorName || 'Player'}</strong>
+              <span>is waiting for a player</span>
+            </div>
+            <div className="battle-stake">
+              <small>ENTRY</small>
+              <strong>₹{match.entryFee}</strong>
+            </div>
+            <button
+              type="button"
+              className="play-button"
+              onClick={() => joinMatch(match)}
+              disabled={Boolean(busyMatchId) || userCoins < match.entryFee}
+            >
+              {busyMatchId === match.id ? 'Joining…' : 'Play'}
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }

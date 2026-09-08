@@ -1,5 +1,5 @@
 import express from 'express';
-import { db } from '../server.js';
+import { getActiveDb } from '../server.js';
 import { verifyToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -8,6 +8,8 @@ const router = express.Router();
 router.get('/history/:uid', verifyToken, async (req, res) => {
   try {
     const { uid } = req.params;
+    if (uid !== req.user.uid) return res.status(403).json({ error: 'Access denied' });
+    const db = await getActiveDb();
     const snapshot = await db.ref(`transactions/${uid}`).get();
 
     if (!snapshot.exists()) {
@@ -29,6 +31,8 @@ router.get('/history/:uid', verifyToken, async (req, res) => {
 router.get('/stats/:uid', verifyToken, async (req, res) => {
   try {
     const { uid } = req.params;
+    if (uid !== req.user.uid) return res.status(403).json({ error: 'Access denied' });
+    const db = await getActiveDb();
     const snapshot = await db.ref(`transactions/${uid}`).get();
 
     if (!snapshot.exists()) {

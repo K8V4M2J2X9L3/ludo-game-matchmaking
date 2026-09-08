@@ -36,7 +36,33 @@ if (!admin.apps.length) {
 }
 
 const db = admin.database();
-export { db, io };
+const databaseCache = new Map();
+
+const getDatabaseForUrl = (databaseURL) => {
+  if (!databaseURL || databaseURL === process.env.FIREBASE_DATABASE_URL) return db;
+  if (!/^https:\/\/[a-z0-9.-]+\.(?:firebaseio\.com|firebasedatabase\.app)$/i.test(databaseURL)) {
+    throw new Error('Invalid Firebase Realtime Database URL');
+  }
+
+  if (!databaseCache.has(databaseURL)) {
+    databaseCache.set(databaseURL, admin.app().database(databaseURL));
+  }
+  return databaseCache.get(databaseURL);
+};
+
+const getActiveDb = async () => {
+  const snapshot = await db.ref('admin/settings/databaseConfig').get();
+  const config = snapshot.val();
+  const databases = Array.isArray(config?.databases)
+    ? config.databases
+    : Object.values(config?.databases || {});
+  const activeDatabase = databases.find(
+    (database) => database.id === config.activeDatabaseId && database.enabled !== false
+  );
+  return getDatabaseForUrl(activeDatabase?.databaseURL);
+};
+
+export { db, getActiveDb, io };
 
 // Routes
 app.use('/api/auth', authRoutes);

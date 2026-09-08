@@ -1,5 +1,6 @@
 import express from 'express';
-import { db, auth } from '../firebase-config.js';
+import { auth } from '../firebase-config.js';
+import { getActiveDb } from '../server.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
@@ -7,14 +8,13 @@ const router = express.Router();
 // Register
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, displayName } = req.body;
-
-    // Create user in Firebase Auth
-    const userRecord = await auth.createUser({
-      email,
-      password,
-      displayName
-    });
+    const token = req.headers.authorization?.split('Bearer ')[1];
+    const { uid, email, phone, displayName } = req.body;
+    if (!token) return res.status(401).json({ error: 'Authentication token required' });
+    const decoded = await auth.verifyIdToken(token);
+    if (decoded.uid !== uid) return res.status(403).json({ error: 'Account mismatch' });
+    const userRecord = await auth.getUser(uid);
+    const db = await getActiveDb();
 
     // Create referral code
     const referralCode = `REF${userRecord.uid.substring(0, 8).toUpperCase()}`;
@@ -23,16 +23,16 @@ router.post('/register', async (req, res) => {
     await db.ref(`users/${userRecord.uid}`).set({
       uid: userRecord.uid,
       email,
+      phone: phone || '',
       displayName,
       photoURL: '',
-      coins: 0,
+      coins: 20,
       winningCoins: 0,
       totalWinnings: 0,
       createdAt: Date.now(),
       referralCode,
       referredBy: req.body.referralCode || null,
       referralRewards: 0,
-      kycVerified: false,
       stats: {
         totalMatches: 0,
         totalWins: 0,
@@ -56,8 +56,7 @@ router.post('/register', async (req, res) => {
       }
     }
 
-    const token = await auth.createCustomToken(userRecord.uid);
-    res.json({ success: true, token, uid: userRecord.uid, user: userRecord });
+    res.json({ success: true, uid: userRecord.uid });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -78,6 +77,7 @@ router.post('/login', async (req, res) => {
 router.get('/profile/:uid', async (req, res) => {
   try {
     const { uid } = req.params;
+    const db = await getActiveDb();
     const snapshot = await db.ref(`users/${uid}`).get();
     
     if (!snapshot.exists()) {
@@ -95,6 +95,7 @@ router.put('/profile/:uid', async (req, res) => {
   try {
     const { uid } = req.params;
     const { displayName, photoURL } = req.body;
+    const db = await getActiveDb();
 
     await db.ref(`users/${uid}`).update({
       displayName,

@@ -117,7 +117,7 @@ export default function Home() {
           </div>
         </div>
         <div className="border-t border-gray-700 mt-8 pt-8 text-center text-sm opacity-60">
-          <p>&copy; 2024 Ludo Battle. All rights reserved. | Admin Password: Bankai$1000</p>
+          <p>&copy; 2026 FriendLudo. All rights reserved.</p>
         </div>
       </footer>
     </div>

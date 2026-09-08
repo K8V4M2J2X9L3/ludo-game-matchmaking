@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { auth, db } from '@/firebase';
-import { ref, onValue, update } from 'firebase/database';
+import { ref, onValue } from 'firebase/database';
 import { io } from 'socket.io-client';
+import { apiRequest } from '@/lib/api';
 
 export default function Game() {
   const router = useRouter();
@@ -33,7 +34,7 @@ export default function Game() {
       setLoading(false);
 
       // Initialize game state
-      if (data.status === 'ongoing') {
+      if (data?.status === 'ongoing') {
         setGameState(prev => ({
           ...prev,
           status: 'playing'
@@ -81,7 +82,10 @@ export default function Game() {
     }
   };
 
-  const handleGameEnd = async (winnerId) => {
+  const handleResign = async () => {
+    const currentUid = auth.currentUser?.uid;
+    const winnerId = Object.keys(match?.players || {}).find((uid) => uid !== currentUid);
+    if (!winnerId) return;
     if (socket) {
       socket.emit('game-end', {
         matchId,
@@ -89,12 +93,11 @@ export default function Game() {
       });
     }
 
-    // Update match result in database
-    const matchRef = ref(db, `matchmaking/${matchId}`);
-    await update(matchRef, {
-      winnerId,
-      status: 'completed',
-      completedAt: Date.now()
+    const token = await auth.currentUser.getIdToken();
+    await apiRequest(`/api/matchmaking/end-match/${matchId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ winnerId })
     });
 
     // Redirect to results
@@ -130,7 +133,7 @@ export default function Game() {
                 <div className="grid grid-cols-4 gap-0 w-full h-full p-4">
                   {/* Home Zones */}
                   {['Red', 'Yellow', 'Blue', 'Green'].map((color, idx) => (
-                    <div key={idx} className={`bg-${color.toLowerCase()}-200 border border-gray-400 rounded flex items-center justify-center">
+                    <div key={idx} className={`bg-${color.toLowerCase()}-200 border border-gray-400 rounded flex items-center justify-center`}>
                       <div className="text-center">
                         <p className="font-semibold text-sm">{color}</p>
                         <p className="text-2xl">🎮</p>
@@ -186,10 +189,10 @@ export default function Game() {
 
               {/* End Game */}
               <button
-                onClick={() => handleGameEnd(auth.currentUser.uid)}
+                onClick={handleResign}
                 className="w-full bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700"
               >
-                🏁 End Game
+                🏳️ Resign Match
               </button>
             </div>
           </div>

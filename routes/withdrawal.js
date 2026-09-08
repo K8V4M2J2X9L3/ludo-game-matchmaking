@@ -1,5 +1,5 @@
 import express from 'express';
-import { db } from '../server.js';
+import { db as configDb, getActiveDb } from '../server.js';
 import { verifyToken } from '../middleware/auth.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -10,13 +10,14 @@ router.post('/request', verifyToken, async (req, res) => {
   try {
     const { amount, accountNumber, ifscCode, accountHolder } = req.body;
     const uid = req.user.uid;
+    const db = await getActiveDb();
 
     // Verify user balance
     const userRef = db.ref(`users/${uid}`);
     const userSnapshot = await userRef.get();
     const user = userSnapshot.val();
 
-    const adminSettingsRef = db.ref('admin/settings');
+    const adminSettingsRef = configDb.ref('admin/settings');
     const settingsSnapshot = await adminSettingsRef.get();
     const settings = settingsSnapshot.val() || { minimumWithdrawal: 100 };
 
@@ -54,6 +55,8 @@ router.post('/request', verifyToken, async (req, res) => {
 router.get('/requests/:uid', verifyToken, async (req, res) => {
   try {
     const { uid } = req.params;
+    if (uid !== req.user.uid) return res.status(403).json({ error: 'Access denied' });
+    const db = await getActiveDb();
     const snapshot = await db.ref('withdrawalRequests').orderByChild('uid').equalTo(uid).get();
 
     if (!snapshot.exists()) {

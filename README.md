@@ -2,6 +2,21 @@
 
 A complete Ludo game platform with live matchmaking, coin system, admin panel, and real money withdrawal capabilities.
 
+## Current Player Flow
+
+- Players register and log in with a 10-digit phone number (stored in Firebase Auth as `phone@friendludo.com`).
+- Creating a battle reserves the entry coins and publishes a waiting challenge in Realtime Database.
+- Only a different authenticated player can join. Both clients are redirected when that real player joins; there is no bot or automatic opponent.
+- Cancelling a still-waiting battle refunds the creator in the same database transaction.
+- Manual deposits show `public/deposit-payment.html` after the player enters an amount. Replace that file with your UPI, QR, bank, or gateway HTML while continuing to read the `amount` query parameter if required.
+- A payment reference creates a pending deposit. Admins approve or reject it from `/admin/deposits`; approval credits the wallet exactly once.
+
+## Multiple Realtime Databases
+
+Open `/admin/settings`, add one or more named Realtime Database URLs, and select the active instance. The browser and Express API both use that instance after the next page reload. Keep the configuration database from `FIREBASE_DATABASE_URL` available because it stores the routing selection.
+
+All configured instances must belong to a Firebase project accepted by the client Auth configuration, and the server service account must have access to them. Publish `firebase-rules.json` to every instance.
+
 ## Features
 
 ### 🎮 Player Features
