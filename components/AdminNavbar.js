@@ -8,23 +8,24 @@ export default function AdminNavbar() {
   };
 
   return (
-    <nav className="bg-red-700 text-white shadow-lg">
-      <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-        <Link href="/admin/dashboard" className="text-2xl font-bold">
+    <nav className="admin-nav">
+      <div className="admin-nav-inner">
+        <Link href="/admin/dashboard" className="admin-brand">
           🔐 Admin Panel
         </Link>
 
-        <div className="flex items-center gap-6">
-          <Link href="/admin/dashboard" className="hover:opacity-80">Dashboard</Link>
-          <Link href="/admin/settings" className="hover:opacity-80">Settings</Link>
-          <Link href="/admin/withdrawals" className="hover:opacity-80">Withdrawals</Link>
-          <Link href="/admin/policies" className="hover:opacity-80">Policies</Link>
-          <Link href="/admin/add-coins" className="hover:opacity-80">Add Coins</Link>
+        <div className="admin-links">
+          <Link href="/admin/dashboard">Dashboard</Link>
+          <Link href="/admin/settings">Settings</Link>
+          <Link href="/admin/withdrawals">Withdrawals</Link>
+          <Link href="/admin/deposits">Deposits</Link>
+          <Link href="/admin/policies">Policies</Link>
+          <Link href="/admin/add-coins">Add Coins</Link>
           <button
             onClick={handleLogout}
-            className="bg-white text-red-700 px-4 py-2 rounded font-semibold hover:bg-gray-100"
+            type="button"
           >
-            Logout
+            Log out
           </button>
         </div>
       </div>

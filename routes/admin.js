@@ -1,7 +1,7 @@
 import express from 'express';
-import { db } from '../server.js';
+import { db, getActiveDb } from '../server.js';
 import { verifyAdmin } from '../middleware/auth.js';
-import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 
@@ -10,13 +10,38 @@ router.post('/login', async (req, res) => {
   try {
     const { password } = req.body;
 
-    if (password !== process.env.ADMIN_PASSWORD) {
+    if (!process.env.ADMIN_PASSWORD || password !== process.env.ADMIN_PASSWORD) {
       return res.status(401).json({ error: 'Invalid admin password' });
     }
 
-    res.json({ success: true, token: crypto.randomBytes(32).toString('hex') });
+    const token = jwt.sign(
+      { role: 'admin' },
+      process.env.JWT_SECRET || process.env.ADMIN_PASSWORD || 'change-this-admin-secret',
+      { expiresIn: '12h' }
+    );
+    res.json({ success: true, token });
   } catch (error) {
     res.status(400).json({ error: error.message });
+  }
+});
+
+// Public bootstrap used by the web app before it attaches Firebase listeners.
+router.get('/database-config', async (req, res) => {
+  try {
+    const snapshot = await db.ref('admin/settings/databaseConfig').get();
+    const config = snapshot.val();
+    const databases = Array.isArray(config?.databases)
+      ? config.databases
+      : Object.values(config?.databases || {});
+    const active = databases.find(
+      (database) => database.id === config.activeDatabaseId && database.enabled !== false
+    );
+    res.json({
+      databaseId: active?.id || 'primary',
+      databaseURL: active?.databaseURL || process.env.FIREBASE_DATABASE_URL || null
+    });
+  } catch (error) {
+    res.json({ databaseId: 'primary', databaseURL: process.env.FIREBASE_DATABASE_URL || null });
   }
 });
 
@@ -35,6 +60,41 @@ router.get('/settings', verifyAdmin, async (req, res) => {
 router.put('/settings', verifyAdmin, async (req, res) => {
   try {
     const settings = req.body;
+    if (settings.depositCoinRate !== undefined) {
+      const rate = Number(settings.depositCoinRate);
+      if (!Number.isFinite(rate) || rate <= 0 || rate > 1000) {
+        return res.status(400).json({ error: 'Deposit coin rate must be between 0 and 1000' });
+      }
+      settings.depositCoinRate = rate;
+    }
+    if (settings.databaseConfig) {
+      const rawDatabases = Array.isArray(settings.databaseConfig.databases)
+        ? settings.databaseConfig.databases
+        : [];
+      const databases = rawDatabases.map((database) => ({
+        id: String(database.id || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+        label: String(database.label || database.id || '').trim().slice(0, 50),
+        databaseURL: String(database.databaseURL || '').trim(),
+        enabled: database.enabled !== false
+      }));
+      const ids = new Set();
+      for (const database of databases) {
+        if (!database.id || ids.has(database.id)) {
+          return res.status(400).json({ error: 'Each database needs a unique ID' });
+        }
+        if (!/^https:\/\/[a-z0-9.-]+\.(?:firebaseio\.com|firebasedatabase\.app)$/i.test(database.databaseURL || '')) {
+          return res.status(400).json({ error: `Invalid database URL for ${database.label || database.id}` });
+        }
+        ids.add(database.id);
+      }
+      const activeDatabaseId = String(settings.databaseConfig.activeDatabaseId || '')
+        .trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      if (databases.length && !ids.has(activeDatabaseId)) {
+        return res.status(400).json({ error: 'Choose an active database from the configured list' });
+      }
+      settings.databaseConfig.databases = databases;
+      settings.databaseConfig.activeDatabaseId = activeDatabaseId;
+    }
     await db.ref('admin/settings').update(settings);
     res.json({ success: true, settings });
   } catch (error) {
@@ -45,7 +105,8 @@ router.put('/settings', verifyAdmin, async (req, res) => {
 // Get all users
 router.get('/users', verifyAdmin, async (req, res) => {
   try {
-    const snapshot = await db.ref('users').get();
+    const activeDb = await getActiveDb();
+    const snapshot = await activeDb.ref('users').get();
     const users = snapshot.exists() ? Object.values(snapshot.val()) : [];
     res.json(users);
   } catch (error) {
@@ -56,7 +117,8 @@ router.get('/users', verifyAdmin, async (req, res) => {
 // Get all withdrawal requests
 router.get('/withdrawal-requests', verifyAdmin, async (req, res) => {
   try {
-    const snapshot = await db.ref('withdrawalRequests').get();
+    const activeDb = await getActiveDb();
+    const snapshot = await activeDb.ref('withdrawalRequests').get();
     const requests = snapshot.exists() ? Object.entries(snapshot.val()).map(([id, data]) => ({ id, ...data })) : [];
     res.json(requests);
   } catch (error) {
@@ -69,29 +131,37 @@ router.put('/withdrawal-requests/:requestId', verifyAdmin, async (req, res) => {
   try {
     const { requestId } = req.params;
     const { status, adminNotes } = req.body;
-
-    const requestRef = db.ref(`withdrawalRequests/${requestId}`);
-    await requestRef.update({
-      status,
-      adminNotes,
-      processedAt: Date.now()
-    });
-
-    const snapshot = await requestRef.get();
-    const request = snapshot.val();
-
-    // If approved, deduct from user's winning coins
-    if (status === 'approved') {
-      const userRef = db.ref(`users/${request.uid}`);
-      const userSnapshot = await userRef.get();
-      const user = userSnapshot.val();
-
-      await userRef.update({
-        winningCoins: (user.winningCoins || 0) - request.amount
-      });
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be approved or rejected' });
     }
 
-    res.json({ success: true, request });
+    const activeDb = await getActiveDb();
+    let failure = '';
+    const result = await activeDb.ref().transaction((root) => {
+      const request = root?.withdrawalRequests?.[requestId];
+      if (!request) {
+        failure = 'Withdrawal request was not found';
+        return;
+      }
+      if (request.status !== 'pending') {
+        failure = 'Withdrawal request was already processed';
+        return;
+      }
+      const user = root.users?.[request.uid];
+      if (status === 'approved' && (!user || (user.winningCoins || 0) < request.amount)) {
+        failure = 'User no longer has enough winning coins';
+        return;
+      }
+
+      request.status = status;
+      request.adminNotes = String(adminNotes || '').slice(0, 300);
+      request.processedAt = Date.now();
+      if (status === 'approved') user.winningCoins -= request.amount;
+      return root;
+    });
+
+    if (!result.committed) return res.status(409).json({ error: failure || 'Could not process withdrawal' });
+    res.json({ success: true, request: result.snapshot.child(`withdrawalRequests/${requestId}`).val() });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -122,19 +192,25 @@ router.put('/policies', verifyAdmin, async (req, res) => {
 // Add coins manually (Zappi API)
 router.post('/add-coins', verifyAdmin, async (req, res) => {
   try {
-    const { uid, coins, reason } = req.body;
+    const { uid, reason } = req.body;
+    const coins = Number(req.body.coins);
+    if (!uid || !Number.isSafeInteger(coins) || coins <= 0) {
+      return res.status(400).json({ error: 'Choose a user and enter a positive whole number of coins' });
+    }
     const { v4: uuidv4 } = await import('uuid');
 
-    const userRef = db.ref(`users/${uid}`);
+    const activeDb = await getActiveDb();
+    const userRef = activeDb.ref(`users/${uid}`);
     const userSnapshot = await userRef.get();
     const user = userSnapshot.val();
+    if (!user) return res.status(404).json({ error: 'User was not found' });
 
     await userRef.update({
       coins: (user.coins || 0) + coins
     });
 
     const transactionId = uuidv4();
-    await db.ref(`transactions/${uid}/${transactionId}`).set({
+    await activeDb.ref(`transactions/${uid}/${transactionId}`).set({
       uid,
       type: 'deposit',
       amount: coins,
@@ -152,9 +228,10 @@ router.post('/add-coins', verifyAdmin, async (req, res) => {
 // Get dashboard stats
 router.get('/dashboard', verifyAdmin, async (req, res) => {
   try {
-    const usersRef = db.ref('users');
-    const matchesRef = db.ref('matchmaking');
-    const withdrawalsRef = db.ref('withdrawalRequests');
+    const activeDb = await getActiveDb();
+    const usersRef = activeDb.ref('users');
+    const matchesRef = activeDb.ref('matchmaking');
+    const withdrawalsRef = activeDb.ref('withdrawalRequests');
 
     const [usersSnapshot, matchesSnapshot, withdrawalsSnapshot] = await Promise.all([
       usersRef.get(),
@@ -176,6 +253,65 @@ router.get('/dashboard', verifyAdmin, async (req, res) => {
     };
 
     res.json(stats);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/deposit-requests', verifyAdmin, async (req, res) => {
+  try {
+    const activeDb = await getActiveDb();
+    const snapshot = await activeDb.ref('depositRequests').get();
+    const requests = snapshot.exists()
+      ? Object.entries(snapshot.val()).map(([id, request]) => ({ id, ...request }))
+      : [];
+    res.json(requests.sort((a, b) => b.createdAt - a.createdAt));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.put('/deposit-requests/:requestId', verifyAdmin, async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { status, adminNotes = '' } = req.body;
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be approved or rejected' });
+    }
+
+    const activeDb = await getActiveDb();
+    let failure = '';
+    const result = await activeDb.ref().transaction((root) => {
+      const request = root?.depositRequests?.[requestId];
+      if (!request) {
+        failure = 'Deposit request was not found';
+        return;
+      }
+      if (request.status !== 'pending') {
+        failure = 'Deposit request was already processed';
+        return;
+      }
+
+      request.status = status;
+      request.adminNotes = String(adminNotes).slice(0, 300);
+      request.processedAt = Date.now();
+      const transaction = root.transactions?.[request.uid]?.[request.transactionId];
+      if (transaction) {
+        transaction.status = status === 'approved' ? 'completed' : 'failed';
+      }
+      if (status === 'approved') {
+        const user = root.users?.[request.uid];
+        if (!user) {
+          failure = 'Deposit user was not found';
+          return;
+        }
+        user.coins = (user.coins || 0) + request.coins;
+      }
+      return root;
+    });
+
+    if (!result.committed) return res.status(409).json({ error: failure || 'Could not process deposit' });
+    res.json({ success: true, request: result.snapshot.child(`depositRequests/${requestId}`).val() });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

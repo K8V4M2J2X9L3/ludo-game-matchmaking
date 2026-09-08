@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { auth, db } from '@/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { ref, onValue } from 'firebase/database';
-import Navbar from '@/components/Navbar';
-import WalletCard from '@/components/WalletCard';
-import MatchmakingCard from '@/components/MatchmakingCard';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { onAuthStateChanged } from 'firebase/auth';
+import { onValue, ref } from 'firebase/database';
+import { auth, db } from '@/firebase';
+import Navbar from '@/components/Navbar';
+import BottomNav from '@/components/BottomNav';
+import MatchmakingCard from '@/components/MatchmakingCard';
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -13,86 +13,66 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        const userRef = ref(db, `users/${currentUser.uid}`);
-        onValue(userRef, (snapshot) => {
-          setUserStats(snapshot.val());
-          setLoading(false);
-        });
-      } else {
+    let unsubscribeUser = () => {};
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      unsubscribeUser();
+      if (!currentUser) {
         window.location.href = '/auth';
+        return;
       }
+      setUser(currentUser);
+      unsubscribeUser = onValue(ref(db, `users/${currentUser.uid}`), (snapshot) => {
+        setUserStats(snapshot.val() || {});
+        setLoading(false);
+      });
     });
-    return unsubscribe;
+    return () => {
+      unsubscribeAuth();
+      unsubscribeUser();
+    };
   }, []);
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
-  }
+  if (loading) return <div className="app-loading"><span className="waiting-spinner" />Loading your battles…</div>;
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <Navbar user={user} />
-      
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        {/* Hero Section */}
-        <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg p-8 mb-8">
-          <h1 className="text-4xl font-bold mb-2">Welcome, {userStats?.displayName}!</h1>
-          <p className="text-lg opacity-90">Play Ludo, Win Coins, Earn Real Money</p>
-        </div>
+    <div className="user-page">
+      <Navbar user={{ ...user, ...userStats }} />
+      <main className="mobile-content dashboard-page">
+        <section className="welcome-panel">
+          <div>
+            <span className="eyebrow">WELCOME BACK</span>
+            <h1>{userStats?.displayName || 'Player'}</h1>
+            <p>Ready for your next real-player battle?</p>
+          </div>
+          <div className="welcome-avatar">{(userStats?.displayName || 'P').slice(0, 1).toUpperCase()}</div>
+        </section>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-lg p-6 shadow">
-            <p className="text-gray-600 text-sm">Coins Balance</p>
-            <p className="text-3xl font-bold text-purple-600">{userStats?.coins || 0}</p>
+        <section className="wallet-strip" aria-label="Wallet balances">
+          <div>
+            <span className="wallet-strip-icon deposit">↓</span>
+            <p><small>Deposit chips</small><strong>₹{userStats?.coins || 0}</strong></p>
+            <Link href="/wallet">Add</Link>
           </div>
-          <div className="bg-white rounded-lg p-6 shadow">
-            <p className="text-gray-600 text-sm">Winning Coins</p>
-            <p className="text-3xl font-bold text-green-600">{userStats?.winningCoins || 0}</p>
+          <div>
+            <span className="wallet-strip-icon winning">★</span>
+            <p><small>Winning chips</small><strong>₹{userStats?.winningCoins || 0}</strong></p>
+            <Link href="/wallet">Withdraw</Link>
           </div>
-          <div className="bg-white rounded-lg p-6 shadow">
-            <p className="text-gray-600 text-sm">Total Wins</p>
-            <p className="text-3xl font-bold text-blue-600">{userStats?.stats?.totalWins || 0}</p>
-          </div>
-          <div className="bg-white rounded-lg p-6 shadow">
-            <p className="text-gray-600 text-sm">Win Rate</p>
-            <p className="text-3xl font-bold text-orange-600">
-              {userStats?.stats?.totalMatches > 0
-                ? Math.round(
-                    (userStats?.stats?.totalWins / userStats?.stats?.totalMatches) * 100
-                  )
-                : 0}
-              %
-            </p>
-          </div>
-        </div>
+        </section>
 
-        {/* Main Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <WalletCard user={userStats} />
-          <MatchmakingCard userId={user?.uid} />
-          <div className="bg-white rounded-lg p-6 shadow">
-            <h2 className="text-xl font-bold mb-4">Quick Links</h2>
-            <div className="space-y-2">
-              <Link href="/profile" className="block px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700">
-                👤 Profile
-              </Link>
-              <Link href="/referral" className="block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                🔗 Referral
-              </Link>
-              <Link href="/wallet" className="block px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-                💳 Wallet
-              </Link>
-              <Link href="/support" className="block px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
-                📞 Support
-              </Link>
-            </div>
-          </div>
-        </div>
+        <section className="notice-banner">
+          <span>⚡</span>
+          <p><strong>Fast real-player matching</strong><small>Create a challenge and it instantly appears for every online player.</small></p>
+        </section>
+
+        <MatchmakingCard userId={user?.uid} />
+
+        <section className="safe-play-note">
+          <span>🛡️</span>
+          <p><strong>Fair play promise</strong><small>No bots or automatic winners. Every open battle is created by a signed-in player.</small></p>
+        </section>
       </main>
+      <BottomNav active="play" />
     </div>
   );
 }

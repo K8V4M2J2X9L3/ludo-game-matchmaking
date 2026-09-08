@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import AdminNavbar from '@/components/AdminNavbar';
+import { apiUrl } from '@/lib/api';
 
 export default function AdminPolicies() {
   const [policies, setPolicies] = useState({
@@ -26,7 +27,7 @@ export default function AdminPolicies() {
   const fetchPolicies = async () => {
     try {
       const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/policies', {
+      const response = await fetch(apiUrl('/api/admin/policies'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
@@ -40,7 +41,7 @@ export default function AdminPolicies() {
     setLoading(true);
     try {
       const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/policies', {
+      const response = await fetch(apiUrl('/api/admin/policies'), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

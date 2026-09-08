@@ -1,186 +1,201 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { onValue, ref } from 'firebase/database';
 import { auth, db } from '@/firebase';
-import { ref, onValue } from 'firebase/database';
+import { apiRequest } from '@/lib/api';
+import Navbar from '@/components/Navbar';
+import BottomNav from '@/components/BottomNav';
 
 export default function Wallet() {
-  const [balance, setBalance] = useState(null);
+  const [user, setUser] = useState(null);
+  const [balance, setBalance] = useState({ coins: 0, winningCoins: 0, totalWinnings: 0 });
   const [transactions, setTransactions] = useState([]);
-  const [activeTab, setActiveTab] = useState('balance');
+  const [activeTab, setActiveTab] = useState('deposit');
   const [amount, setAmount] = useState('');
-  const [coins, setCoins] = useState('');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [showPaymentPage, setShowPaymentPage] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => onAuthStateChanged(auth, (currentUser) => {
+    if (!currentUser) {
+      window.location.href = '/auth';
+      return;
+    }
+    setUser(currentUser);
+  }), []);
 
   useEffect(() => {
-    const user = auth.currentUser;
-    if (user) {
-      const walletRef = ref(db, `users/${user.uid}`);
-      onValue(walletRef, (snapshot) => {
-        const data = snapshot.val();
-        setBalance({
-          coins: data.coins || 0,
-          winningCoins: data.winningCoins || 0,
-          totalWinnings: data.totalWinnings || 0
-        });
+    if (!user) return undefined;
+    const unsubscribeWallet = onValue(ref(db, `users/${user.uid}`), (snapshot) => {
+      const data = snapshot.val() || {};
+      setBalance({
+        coins: data.coins || 0,
+        winningCoins: data.winningCoins || 0,
+        totalWinnings: data.totalWinnings || 0
       });
+    });
+    const unsubscribeTransactions = onValue(ref(db, `transactions/${user.uid}`), (snapshot) => {
+      const items = snapshot.exists()
+        ? Object.entries(snapshot.val()).map(([id, transaction]) => ({ id, ...transaction }))
+        : [];
+      setTransactions(items.sort((a, b) => b.timestamp - a.timestamp));
+    });
+    return () => {
+      unsubscribeWallet();
+      unsubscribeTransactions();
+    };
+  }, [user]);
 
-      const transRef = ref(db, `transactions/${user.uid}`);
-      onValue(transRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const trans = Object.entries(snapshot.val()).map(([id, data]) => ({
-            id,
-            ...data
-          }));
-          setTransactions(trans.sort((a, b) => b.timestamp - a.timestamp));
-        }
-      });
+  const numericAmount = Number(amount);
+  const paymentPageUrl = useMemo(
+    () => `/deposit-payment.html?amount=${encodeURIComponent(amount || '0')}`,
+    [amount]
+  );
+
+  const continueToPayment = () => {
+    if (!Number.isSafeInteger(numericAmount) || numericAmount < 10) {
+      setMessage('Enter a deposit amount of at least ₹10.');
+      return;
     }
-  }, []);
+    setMessage('');
+    setShowPaymentPage(true);
+  };
 
-  const handleAddCoins = async () => {
-    if (!amount || !coins) return;
+  const submitDeposit = async () => {
     setLoading(true);
+    setMessage('');
     try {
-      const response = await fetch('/api/wallet/add-coins', {
+      const token = await auth.currentUser.getIdToken();
+      await apiRequest('/api/wallet/deposit-request', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${await auth.currentUser.getIdToken()}`
-        },
-        body: JSON.stringify({ amount: parseInt(amount), coins: parseInt(coins) })
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: numericAmount, paymentReference })
       });
-      const data = await response.json();
-      // Handle Razorpay integration here
-      alert('Redirecting to payment gateway...');
+      setMessage('Deposit submitted. Coins will be added after admin approval.');
       setAmount('');
-      setCoins('');
+      setPaymentReference('');
+      setShowPaymentPage(false);
+      setActiveTab('history');
     } catch (error) {
-      alert('Error: ' + error.message);
+      setMessage(error.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto bg-white rounded-lg p-8 shadow-lg">
-      <h1 className="text-3xl font-bold mb-6">💳 Wallet</h1>
-
-      {/* Balance Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-gradient-to-br from-purple-500 to-purple-700 text-white rounded-lg p-6">
-          <p className="text-sm opacity-90">Playable Coins</p>
-          <p className="text-3xl font-bold">{balance?.coins || 0}</p>
-        </div>
-        <div className="bg-gradient-to-br from-green-500 to-green-700 text-white rounded-lg p-6">
-          <p className="text-sm opacity-90">Winning Coins</p>
-          <p className="text-3xl font-bold">{balance?.winningCoins || 0}</p>
-        </div>
-        <div className="bg-gradient-to-br from-blue-500 to-blue-700 text-white rounded-lg p-6">
-          <p className="text-sm opacity-90">Total Winnings</p>
-          <p className="text-3xl font-bold">₹{balance?.totalWinnings || 0}</p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-4 mb-6 border-b">
-        <button
-          onClick={() => setActiveTab('balance')}
-          className={`pb-2 font-semibold ${
-            activeTab === 'balance'
-              ? 'text-purple-600 border-b-2 border-purple-600'
-              : 'text-gray-600'
-          }`}
-        >
-          Balance
-        </button>
-        <button
-          onClick={() => setActiveTab('add')}
-          className={`pb-2 font-semibold ${
-            activeTab === 'add'
-              ? 'text-purple-600 border-b-2 border-purple-600'
-              : 'text-gray-600'
-          }`}
-        >
-          Add Coins
-        </button>
-        <button
-          onClick={() => setActiveTab('history')}
-          className={`pb-2 font-semibold ${
-            activeTab === 'history'
-              ? 'text-purple-600 border-b-2 border-purple-600'
-              : 'text-gray-600'
-          }`}
-        >
-          History
-        </button>
-      </div>
-
-      {/* Tab Content */}
-      {activeTab === 'add' && (
-        <div className="space-y-4">
+    <div className="user-page">
+      <Navbar user={{ ...user, coins: balance.coins }} />
+      <main className="mobile-content wallet-page">
+        <div className="page-title-row">
           <div>
-            <label className="block text-sm font-semibold mb-2">Amount (₹)</label>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-              placeholder="Enter amount"
-            />
+            <span className="eyebrow">YOUR MONEY</span>
+            <h1>Wallet</h1>
           </div>
-          <div>
-            <label className="block text-sm font-semibold mb-2">Coins</label>
-            <input
-              type="number"
-              value={coins}
-              onChange={(e) => setCoins(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-              placeholder="Enter coins"
-            />
-          </div>
-          <button
-            onClick={handleAddCoins}
-            disabled={loading}
-            className="w-full bg-purple-600 text-white py-2 rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-50"
-          >
-            {loading ? 'Processing...' : 'Add Coins'}
-          </button>
+          <button className="outline-button" type="button" onClick={() => setActiveTab('history')}>History</button>
         </div>
-      )}
 
-      {activeTab === 'history' && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="px-4 py-2">Type</th>
-                <th className="px-4 py-2">Amount</th>
-                <th className="px-4 py-2">Status</th>
-                <th className="px-4 py-2">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((trans) => (
-                <tr key={trans.id} className="border-b">
-                  <td className="px-4 py-2 font-semibold">{trans.type}</td>
-                  <td className="px-4 py-2">{trans.amount}</td>
-                  <td className="px-4 py-2">
-                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                      trans.status === 'completed'
-                        ? 'bg-green-100 text-green-700'
-                        : trans.status === 'pending'
-                        ? 'bg-yellow-100 text-yellow-700'
-                        : 'bg-red-100 text-red-700'
-                    }`}>
-                      {trans.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">{new Date(trans.timestamp).toLocaleDateString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="wallet-summary-grid">
+          <section className="wallet-summary deposit-balance">
+            <span>Deposit chips</span>
+            <strong>₹{balance.coins}</strong>
+            <small>Ready to play</small>
+          </section>
+          <section className="wallet-summary winning-balance">
+            <span>Winning chips</span>
+            <strong>₹{balance.winningCoins}</strong>
+            <small>Available to withdraw</small>
+          </section>
         </div>
-      )}
+
+        <div className="segmented-tabs">
+          <button className={activeTab === 'deposit' ? 'active' : ''} onClick={() => setActiveTab('deposit')}>Add cash</button>
+          <button className={activeTab === 'history' ? 'active' : ''} onClick={() => setActiveTab('history')}>Transactions</button>
+        </div>
+
+        {activeTab === 'deposit' ? (
+          <section className="surface-card deposit-card">
+            <div className="card-title-block">
+              <span className="card-icon">＋</span>
+              <div>
+                <h2>Add deposit chips</h2>
+                <p>Enter an amount, complete the payment, then send its reference for approval.</p>
+              </div>
+            </div>
+
+            {!showPaymentPage ? (
+              <>
+                <label className="field-label" htmlFor="deposit-amount">Deposit amount</label>
+                <div className="money-field">
+                  <span>₹</span>
+                  <input
+                    id="deposit-amount"
+                    type="number"
+                    min="10"
+                    inputMode="numeric"
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                    placeholder="Enter amount"
+                  />
+                </div>
+                <div className="quick-amounts deposit-quick-amounts">
+                  {[100, 250, 500, 1000].map((value) => (
+                    <button key={value} type="button" onClick={() => setAmount(String(value))}>₹{value}</button>
+                  ))}
+                </div>
+                <button className="primary-action" type="button" onClick={continueToPayment}>Continue to payment</button>
+              </>
+            ) : (
+              <div className="payment-step">
+                <div className="payment-frame-header">
+                  <div><span>PAYMENT AMOUNT</span><strong>₹{numericAmount}</strong></div>
+                  <button type="button" onClick={() => setShowPaymentPage(false)}>Change</button>
+                </div>
+                <iframe
+                  className="deposit-payment-frame"
+                  src={paymentPageUrl}
+                  title="Deposit payment instructions"
+                  sandbox="allow-scripts allow-forms allow-popups allow-top-navigation-by-user-activation"
+                />
+                <label className="field-label" htmlFor="payment-reference">Payment / UTR reference</label>
+                <input
+                  className="standard-input"
+                  id="payment-reference"
+                  value={paymentReference}
+                  maxLength="80"
+                  onChange={(event) => setPaymentReference(event.target.value)}
+                  placeholder="Enter reference after payment"
+                />
+                <button className="primary-action" type="button" disabled={loading} onClick={submitDeposit}>
+                  {loading ? 'Submitting…' : 'Send for admin approval'}
+                </button>
+              </div>
+            )}
+            {message && <p className="inline-message">{message}</p>}
+          </section>
+        ) : (
+          <section className="surface-card transaction-card">
+            <h2>Recent transactions</h2>
+            {transactions.length === 0 ? (
+              <div className="empty-transactions"><span>🧾</span><p>No transactions yet.</p></div>
+            ) : transactions.map((transaction) => (
+              <div className="transaction-row" key={transaction.id}>
+                <div className={`transaction-icon ${transaction.type}`}>{transaction.type === 'deposit' ? '↓' : '₹'}</div>
+                <div className="transaction-copy">
+                  <strong>{transaction.description || transaction.type}</strong>
+                  <span>{new Date(transaction.timestamp).toLocaleString()}</span>
+                </div>
+                <div className="transaction-value">
+                  <strong>₹{transaction.amount}</strong>
+                  <span className={`status ${transaction.status}`}>{transaction.status}</span>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+      </main>
+      <BottomNav active="wallet" />
     </div>
   );
 }

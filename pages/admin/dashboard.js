@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import AdminNavbar from '@/components/AdminNavbar';
+import { apiUrl } from '@/lib/api';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
@@ -19,7 +20,7 @@ export default function AdminDashboard() {
   const fetchStats = async () => {
     try {
       const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/dashboard', {
+      const response = await fetch(apiUrl('/api/admin/dashboard'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();

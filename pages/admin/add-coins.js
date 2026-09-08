@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import AdminNavbar from '@/components/AdminNavbar';
+import { apiUrl } from '@/lib/api';
 
 export default function AdminAddCoins() {
   const [users, setUsers] = useState([]);
@@ -23,7 +24,7 @@ export default function AdminAddCoins() {
   const fetchUsers = async () => {
     try {
       const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/users', {
+      const response = await fetch(apiUrl('/api/admin/users'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
@@ -43,7 +44,7 @@ export default function AdminAddCoins() {
     setLoading(true);
     try {
       const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/add-coins', {
+      const response = await fetch(apiUrl('/api/admin/add-coins'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

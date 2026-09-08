@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import AdminNavbar from '@/components/AdminNavbar';
+import { apiUrl } from '@/lib/api';
 
 export default function AdminWithdrawals() {
   const [withdrawals, setWithdrawals] = useState([]);
@@ -21,7 +22,7 @@ export default function AdminWithdrawals() {
   const fetchWithdrawals = async () => {
     try {
       const token = localStorage.getItem('adminToken');
-      const response = await fetch('/api/admin/withdrawal-requests', {
+      const response = await fetch(apiUrl('/api/admin/withdrawal-requests'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
@@ -36,7 +37,7 @@ export default function AdminWithdrawals() {
   const handleApproveWithdrawal = async (requestId) => {
     try {
       const token = localStorage.getItem('adminToken');
-      await fetch(`/api/admin/withdrawal-requests/${requestId}`, {
+      await fetch(apiUrl(`/api/admin/withdrawal-requests/${requestId}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -55,7 +56,7 @@ export default function AdminWithdrawals() {
   const handleRejectWithdrawal = async (requestId) => {
     try {
       const token = localStorage.getItem('adminToken');
-      await fetch(`/api/admin/withdrawal-requests/${requestId}`, {
+      await fetch(apiUrl(`/api/admin/withdrawal-requests/${requestId}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
